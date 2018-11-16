@@ -26,6 +26,8 @@ use Symfony\Component\Routing\RouteCollection;
  */
 class PhpMatcherDumper extends MatcherDumper
 {
+	const ENV_MARKER = "1e5b240e-287b-4def-a42d-0e17be3d0008";
+
     private $expressionLanguage;
     private $signalingException;
 
@@ -56,7 +58,7 @@ class PhpMatcherDumper extends MatcherDumper
         // trailing slash support is only enabled if we know how to redirect the user
         $interfaces = class_implements($options['base_class']);
 
-        return <<<EOF
+        $code = <<<EOF
 <?php
 
 use Symfony\Component\Routing\Matcher\Dumper\PhpMatcherTrait;
@@ -77,6 +79,17 @@ class {$options['class']} extends {$options['base_class']}
 }
 
 EOF;
+
+        $code = preg_replace_callback('/' . preg_quote(static::ENV_MARKER) . '(.+?)' . preg_quote(static::ENV_MARKER) . '/', function ($m) {
+            return '\' . preg_quote(getenv(' . static::export($m[1]) . ')) . \'';
+        }, $code);
+
+        // dumped regexes have dashes escaped
+        $code = preg_replace_callback('/' . preg_quote(str_replace('-', '\\\\-', static::ENV_MARKER)) . '(.+?)' . preg_quote(str_replace('-', '\\\\-', static::ENV_MARKER)) . '/', function ($m) {
+            return '\' . preg_quote(getenv(' . static::export($m[1]) . ')) . \'';
+        }, $code);
+
+        return $code;
     }
 
     public function addExpressionLanguageProvider(ExpressionFunctionProviderInterface $provider)

@@ -13,9 +13,13 @@ namespace Symfony\Bundle\FrameworkBundle\Tests\Routing;
 
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
+use Symfony\Bundle\FrameworkBundle\Routing\RedirectableUrlMatcher;
 use Symfony\Bundle\FrameworkBundle\Routing\Router;
 use Symfony\Component\Config\Loader\LoaderInterface;
 use Symfony\Component\DependencyInjection\Config\ContainerParametersResource;
+use Symfony\Component\Routing\Matcher\Dumper\PhpMatcherDumper;
+use Symfony\Component\Routing\Matcher\UrlMatcher;
+use Symfony\Component\Routing\RequestContext;
 use Symfony\Component\Routing\Route;
 use Symfony\Component\Routing\RouteCollection;
 
@@ -265,32 +269,90 @@ class RouterTest extends TestCase
         );
     }
 
-    /**
-     * @expectedException \Symfony\Component\DependencyInjection\Exception\RuntimeException
-     * @expectedExceptionMessage Using "%env(FOO)%" is not allowed in routing configuration.
-     */
     public function testEnvPlaceholders()
     {
-        $routes = new RouteCollection();
+        $router = new Router($this->getPsr11ServiceContainer($this->getEnvRouteCollection()), 'foo', array(), null, $this->getParameterBag());
 
-        $routes->add('foo', new Route('/%env(FOO)%'));
+        $dumper = new PhpMatcherDumper($router->getRouteCollection());
 
-        $router = new Router($this->getPsr11ServiceContainer($routes), 'foo', array(), null, $this->getParameterBag());
-        $router->getRouteCollection();
+        $fileName = __DIR__ . '/../Fixtures/Routing/env_matcher.php';
+        if (!file_exists($fileName)) {
+            file_put_contents($fileName, $dumper->dump());
+        }
+        $this->assertStringEqualsFile($fileName, $dumper->dump(), '->dump() correctly dumps routes as optimized PHP code.');
+
+        $className = 'Matcher' . md5(uniqid("", true));
+        eval(substr($dumper->dump([
+            'class' => $className,
+            'base_class' => RedirectableUrlMatcher::class,
+        ]), 5));
+
+        putenv("FOO=abc");
+        /** @var UrlMatcher $abcMatcher */
+        $abcMatcher = new $className(new RequestContext());
+
+        $this->assertEquals('foo', $abcMatcher->match('/abc')['_route']);
+        $this->assertEquals('bar', $abcMatcher->match('/abc/bar')['_route']);
+        $this->assertEquals('baz', $abcMatcher->match('/baz/abc')['_route']);
+        
+        $dynamicFooMatch = $abcMatcher->match('/abc/foo/42');
+        $this->assertEquals('dynamic_foo', $dynamicFooMatch['_route']);
+        $this->assertEquals('42', $dynamicFooMatch['id']);
+
+        $dynamicBarMatch = $abcMatcher->match('/abc/bar/42');
+        $this->assertEquals('dynamic_bar', $dynamicBarMatch['_route']);
+        $this->assertEquals('42', $dynamicBarMatch['id']);
+
+        $dynamicBazMatch = $abcMatcher->match('/baz/abc/42');
+        $this->assertEquals('dynamic_baz', $dynamicBazMatch['_route']);
+        $this->assertEquals('42', $dynamicBazMatch['id']);
+        
+        putenv("FOO=xyz");
+        /** @var UrlMatcher $xyzMatcher */
+        $xyzMatcher = new $className(new RequestContext());
+        
+        $this->assertEquals('foo', $xyzMatcher->match('/xyz')['_route']);
+        $this->assertEquals('bar', $xyzMatcher->match('/xyz/bar')['_route']);
+        $this->assertEquals('baz', $xyzMatcher->match('/baz/xyz')['_route']);
+
+        $dynamicFooMatch = $xyzMatcher->match('/xyz/foo/42');
+        $this->assertEquals('dynamic_foo', $dynamicFooMatch['_route']);
+        $this->assertEquals('42', $dynamicFooMatch['id']);
+
+        $dynamicBarMatch = $xyzMatcher->match('/xyz/bar/42');
+        $this->assertEquals('dynamic_bar', $dynamicBarMatch['_route']);
+        $this->assertEquals('42', $dynamicBarMatch['id']);
+
+        $dynamicBazMatch = $xyzMatcher->match('/baz/xyz/42');
+        $this->assertEquals('dynamic_baz', $dynamicBazMatch['_route']);
+        $this->assertEquals('42', $dynamicBazMatch['id']);
     }
 
-    /**
-     * @expectedException \Symfony\Component\DependencyInjection\Exception\RuntimeException
-     * @expectedExceptionMessage Using "%env(FOO)%" is not allowed in routing configuration.
-     */
-    public function testEnvPlaceholdersWithSfContainer()
+    private function getEnvRouteCollection(): RouteCollection
     {
         $routes = new RouteCollection();
 
         $routes->add('foo', new Route('/%env(FOO)%'));
+        $routes->add('bar', new Route('/%env(FOO)%/bar'));
+        $routes->add('baz', new Route('/baz/%env(FOO)%'));
+        $routes->add('dynamic_foo', new Route('/%env(FOO)%/foo/{id}'));
+        $routes->add('dynamic_bar', new Route('/%env(FOO)%/bar/{id}'));
+        $routes->add('dynamic_baz', new Route('/baz/%env(FOO)%/{id}'));
 
-        $router = new Router($this->getServiceContainer($routes), 'foo');
-        $router->getRouteCollection();
+        return $routes;
+    }
+
+    public function testEnvPlaceholdersWithSfContainer()
+    {
+        $router = new Router($this->getServiceContainer($this->getEnvRouteCollection()), 'foo');
+
+        $dumper = new PhpMatcherDumper($router->getRouteCollection());
+
+        $fileName = __DIR__ . '/../Fixtures/Routing/env_matcher.php';
+        if (!file_exists($fileName)) {
+            file_put_contents($fileName, $dumper->dump());
+        }
+        $this->assertStringEqualsFile($fileName, $dumper->dump(), '->dump() correctly dumps routes as optimized PHP code.');
     }
 
     public function testHostPlaceholders()

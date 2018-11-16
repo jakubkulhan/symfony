@@ -20,6 +20,7 @@ use Symfony\Component\DependencyInjection\Exception\ParameterNotFoundException;
 use Symfony\Component\DependencyInjection\Exception\RuntimeException;
 use Symfony\Component\DependencyInjection\ServiceSubscriberInterface;
 use Symfony\Component\HttpKernel\CacheWarmer\WarmableInterface;
+use Symfony\Component\Routing\Matcher\Dumper\PhpMatcherDumper;
 use Symfony\Component\Routing\RequestContext;
 use Symfony\Component\Routing\RouteCollection;
 use Symfony\Component\Routing\Router as BaseRouter;
@@ -158,8 +159,8 @@ class Router extends BaseRouter implements WarmableInterface, ServiceSubscriberI
                 return '%%';
             }
 
-            if (preg_match('/^env\(\w+\)$/', $match[1])) {
-                throw new RuntimeException(sprintf('Using "%%%s%%" is not allowed in routing configuration.', $match[1]));
+            if (preg_match('/^env\((\w+)\)$/', $match[1], $env)) {
+                return PhpMatcherDumper::ENV_MARKER . $env[1] . PhpMatcherDumper::ENV_MARKER;
             }
 
             $resolved = ($this->paramFetcher)($match[1]);
